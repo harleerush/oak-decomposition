@@ -1,0 +1,466 @@
+## GEAUGA CHAPTER A ## 
+# Leaf decomp by habitat, oak species, mesh (invertebrate access) + HFA
+#No invertebrate community data 
+
+#Load the data for ALL percent mass loss and k
+library(readxl)
+MassK<- read_excel("data/GPD_MassLoss.K_All.xlsx")
+
+#Data check
+summary(MassK) 
+dim(MassK) 
+str(MassK) 
+head(MassK)
+View(MassK)
+
+
+# Load packages
+library(lme4)
+library(lmerTest)
+library(performance)
+library(emmeans)
+library(see)
+library(dplyr)
+library(ggplot2)
+library(ggpattern)
+
+#------------------------------------------------------------------------------#
+
+# Descriptive stats
+desc_summary <- MassK %>%
+  group_by(Month, Habitat, Mesh, Species) %>%
+  summarise(
+    n = n(),
+    mean_massloss = mean(PercMassLoss, na.rm = TRUE),
+    sd_massloss = sd(PercMassLoss, na.rm = TRUE),
+    se_massloss = sd_massloss / sqrt(n),
+    mean_k = mean(k, na.rm = TRUE),
+    sd_k = sd(k, na.rm = TRUE),
+    se_k = sd_k / sqrt(n),
+    .groups = "drop")
+View(desc_summary)
+
+
+##Overall decomposition (percnet mass loss) over time
+MassK %>%
+  group_by(Month) %>%
+  summarise(
+    mean_massloss = mean(PercMassLoss, na.rm = TRUE),
+    se = sd(PercMassLoss, na.rm = TRUE)/sqrt(n()))
+
+## Habitat and k
+MassK %>%
+  group_by(Habitat) %>%
+  summarise(mean_PML = mean(PercMassLoss, na.rm = TRUE),
+    se_PML = sd(PercMassLoss, na.rm = TRUE)/sqrt(n()),
+    mean_k = mean(k, na.rm = TRUE),
+    se_k = sd(k, na.rm = TRUE)/sqrt(n()))
+
+##Mesh and k
+MassK %>%
+  group_by(Mesh) %>%
+  summarise(mean_PML = mean(PercMassLoss, na.rm = TRUE),
+    se_PML = sd(PercMassLoss, na.rm = TRUE)/sqrt(n()),
+    mean_k = mean(k, na.rm = TRUE),
+    se_k = sd(k, na.rm = TRUE)/sqrt(n()))
+
+##Oak Species and k
+MassK %>%
+  group_by(Species) %>%
+  summarise(mean_PML = mean(PercMassLoss, na.rm = TRUE),
+    se_PML = sd(PercMassLoss, na.rm = TRUE)/sqrt(n()),
+    mean_k = mean(k, na.rm = TRUE),
+    se_k = sd(k, na.rm = TRUE)/sqrt(n()))
+  
+#------------------------------------------------------------------------------#
+
+#Leaf Moisture Data
+
+moist_summary <- MassK %>%
+  group_by(Month, Habitat) %>%
+  summarise(
+    mean_moist = mean(MoisturePerc, na.rm = TRUE),
+    se_moist = sd(MoisturePerc, na.rm = TRUE) / sqrt(n()),
+    .groups = "drop") %>%
+  mutate(Habitat = recode(Habitat,"Lowland" = "Bottom land"))
+
+moist_summary
+
+# Plot
+ggplot(moist_summary,
+       aes(x = Month,
+           y = mean_moist,
+           linetype = Habitat,
+           group = Habitat)) +
+  geom_line(size = 1, color = "black") +
+  geom_point(size = 3, color = "black") +
+  geom_errorbar(
+    aes(ymin = mean_moist - se_moist,
+        ymax = mean_moist + se_moist),
+    width = 0.2,
+    color = "black" ) +
+  
+  labs(x = "Month", y = "Mean Percent Leaf Moisture (%)", linetype = "Habitat") +
+  theme_classic() +
+  scale_x_continuous(breaks = c(0, 3, 6, 9, 12, 15, 18))+ theme_classic() + 
+  theme(legend.position = "right",
+    axis.title = element_text(size = 28),
+    axis.text = element_text(size = 26),
+    legend.title = element_text(size = 28),
+    legend.text = element_text(size = 26),
+    legend.key.width = unit(1.5, "cm"))
+
+mod_moist <- lmer(MoisturePerc ~ Habitat * Month + (1 | Park),
+                  data = MassK)
+summary(mod_moist)
+anova(mod_moist)
+
+#------------------------------------------------------------------------------#
+MassK$Month <- factor(MassK$Month)
+## Decay constant (k) ##
+
+MassK_18 <- subset(MassK, Month == 18)
+MassK_18 <- droplevels(MassK_18)
+
+MassK <- MassK %>%
+  mutate(
+    Home = case_when(
+      Species == "Pin" & Habitat == "Lowland" ~ "Home",
+      Species == "Pin" & Habitat == "Upland"     ~ "Away",
+      Species == "Red"     & Habitat == "Upland"     ~ "Home",
+      Species == "Red"     & Habitat == "Lowland" ~ "Away",
+      TRUE ~ NA_character_),
+    Home  = factor(Home, levels = c("Away","Home")),
+    Month = factor(Month, levels = sort(unique(Month))),
+    Mesh  = factor(Mesh))
+
+# Decomposition rate constant k (LMM) by mesh, habitat, species, month, and park/rep random
+mod_k <- lmer(k ~ Mesh * Habitat * Species + (1 | Park / Rep),  data = MassK)
+mod_k <- lmer(k ~ Mesh * Habitat * Species + (1 | Park),  data = MassK)
+mod_k <- lmer(k ~ Mesh * Habitat * Species + (1 | Rep),  data = MassK)
+#Variance from park and replicate are 0, so I can remove this from the model and simplify to LM
+
+#Simplified LM for k
+lm_k <- lm(k ~ Mesh * Habitat * Species , data = MassK)
+
+check_model(lm_k) #Check model assumptions 
+#Good
+
+summary(lm_k)
+anova(lm_k)
+#No significance!
+
+################################################################################
+
+#### PERCENT MASS LOSS LMMS ###
+PML_model <- lmer(PercMassLoss ~ Species * Habitat * Mesh + Month + (1|Park/Rep), 
+                  data=MassK)
+check_model(PML_model)
+
+#Model summary
+summary(PML_model)
+anova(PML_model)
+#                          Estimate    Std. Error     df     t value    Pr(>|t|)
+#HabitatUpland             -1.77240    0.85167    677.90984  -2.081     0.0378
+#MeshF                     -6.00153    0.86036    676.46601  -6.976     7.27e-12
+#Month                      2.96723    0.03522    677.57412  84.237     < 2e-16
+#SpeciesRed:MeshF          -2.71148    1.21032    676.92519  -2.240     0.0254
+
+
+#Emmeans / Post Hoc
+emmeanshab <- emmeans(PML_model, ~ Habitat | Species * Mesh)
+pairs(emmeanshab, adjust = "tukey")
+
+emmeanscf <- emmeans(PML_model, ~ Mesh | Species * Habitat)
+pairs(emmeanscf, adjust = "tukey")
+
+emmeansSpp <- emmeans(PML_model, ~ Species |  Mesh)
+pairs(emmeansSpp, adjust = "tukey")
+
+################################################################################
+
+#### PERCENT MASS LOSS LMM MONTH 18 - END TERM ###
+MassK_18 <- subset(MassK, Month == 18)
+
+PML_model18 <- lmer(PercMassLoss ~ Species * Habitat * Mesh + (1|Park/Rep), 
+                  data=MassK_18)
+check_model(PML_model18)
+
+#Model summary
+summary(PML_model18)
+anova(PML_model18)
+#                     Estimate   Std. Error      df      t value   Pr(>|t|)
+#HabitatUpland        -7.1348     2.9311      89.3803     -2.434   0.0169
+#MeshF                13.3387     2.9779      88.5487     -4.479   2.23e-05
+
+
+#Emmeans / Post Hoc
+#post hoc for mesh
+emm_mesh <- emmeans(PML_model18, ~ Mesh | Species * Habitat)
+pairs(emm_mesh, adjust = "tukey")
+
+#post hoc for habitat
+emm_habitat <- emmeans(PML_model18, ~ Habitat | Mesh )
+pairs(emm_habitat, adjust = "tukey")
+
+
+
+#BoxPlot for End point decomposition (Month 18)
+MassK_18 <- subset(MassK, Month == 18)
+MassK_18 <- droplevels(MassK_18)
+
+# Make sure these are the right types
+MassK_18$PercMassLoss <- as.numeric(as.character(MassK_18$PercMassLoss))
+MassK_18$Habitat <- factor(MassK_18$Habitat)
+MassK_18$Mesh <- factor(MassK_18$Mesh)
+MassK_18$Species <- factor(MassK_18$Species)
+#Rename the mesh sizes
+MassK_18$Mesh <- factor(MassK_18$Mesh, levels = c("C", "F"),
+                        labels = c("Coarse", "Fine"))
+
+#Plot
+ggplot(MassK_18, aes(x = Habitat, y = PercMassLoss)) +
+  geom_boxplot(
+    aes(fill = Mesh, group = interaction(Habitat, Mesh)),
+    position = position_dodge(width = 0.75),
+    width = 0.6,outlier.shape = NA,color = "black") +
+  geom_point(aes(group = Mesh),
+    position = position_jitterdodge(
+      jitter.width = 0.12,dodge.width = 0.75),
+    size = 3,alpha = 0.7,color = "black") +
+  labs(x = "Habitat",y = "Percent mass loss (%)",fill = "Mesh size") +
+  scale_fill_manual(values = c("Coarse" = "thistle4", "Fine" = "grey100")) +
+  theme_classic() +
+  theme(
+    axis.title = element_text(size = 28, color = "black"),
+    axis.text  = element_text(size = 26, color = "black"),
+    axis.line  = element_line(linewidth = 1),
+    axis.ticks = element_line(linewidth = 1),
+    legend.title = element_text(size = 28),
+    legend.text  = element_text(size = 26, color = "black"),
+    legend.key.width = unit(1.5, "cm"))
+
+## Plot for percent mass loss over time by mesh size
+#Plot data
+plot_data <- MassK %>%
+  group_by(Month, Mesh, Species, Habitat) %>%
+  summarise(
+    mean_massloss = mean(PercMassLoss, na.rm = TRUE),
+    se = sd(PercMassLoss, na.rm = TRUE) / sqrt(n()),
+    .groups = "drop")
+
+#Rename coarse and fine mesh 
+plot_data$Mesh <- recode(plot_data$Mesh,
+                         "C" = "Coarse",
+                         "F" = "Fine")
+
+plot_data <- plot_data %>%
+  mutate(Month = as.numeric(as.character(Month)))
+
+#Plot % Mass Loss by Time with Mesh lines
+ggplot(plot_data, aes(x = Month, y = mean_massloss, linetype = Mesh, shape = Mesh)) + 
+  geom_line(linewidth = 1, color = "black") + 
+  geom_point(size = 4, stroke = 1, color = "black") + 
+  geom_errorbar(aes(ymin = mean_massloss - se, ymax = mean_massloss + se), 
+                width = 0.3, linewidth = 0.8, color = "black") + 
+  labs(x = "Time (months)", y = "Percent mass loss (%)", linetype = "Mesh size", 
+       shape = "Mesh size" ) + 
+  scale_linetype_manual(values = c( "Coarse" = "solid", "Fine" = "dashed")) + 
+  scale_shape_manual(values = c("Coarse" = 19, "Fine" = 19)) +
+  scale_x_continuous(breaks = c(0, 3, 6, 9, 12, 15, 18))+ theme_classic() + 
+  theme_classic() + theme( axis.title = element_text(size = 28, color = "black"), 
+                           axis.text = element_text(size = 26, color = "black"),
+                           axis.line = element_line(linewidth = 1), 
+                           axis.ticks = element_line(linewidth = 1), 
+                           legend.title = element_text(size = 28), 
+                           legend.text = element_text(size = 26), 
+                           legend.key.width = unit(2, "cm") )
+
+#------------------------------------------------------------------------------#
+
+ ####### H O M E F I E L D    A D V A N T A G E    I N D I C E S #######
+
+#Load the data for HFAI values
+MassHFAI<-read_excel("data/Ch2_GPD/MassLoss_HFAI.xlsx")
+
+##Getting to know you...♩ Getting to know all about you...♫
+summary(MassHFAI) #view a summary of the data (median, quartiles, etc.)
+dim(MassHFAI) #dimensions
+str(MassHFAI) #Structure. What are the variables? 
+head(MassHFAI)
+
+
+library(dplyr)
+library(ggplot2)
+
+# Make sure Month is ordered correctly for plotting
+MassHFAI <- MassHFAI %>%
+  mutate(
+    Month = as.numeric(as.character(Month)),  # if Month is a factor like "2","6","12","18"
+    Mesh  = factor(Mesh) )
+
+MassHFAI_D18 <- subset(MassHFAI, Month == 18)
+
+hfai_sum_sp <- MassHFAI_D18 %>%
+  filter(!is.na(HFAI)) %>%
+  group_by(Species, Mesh) %>%
+  summarise(
+    n = n(),
+    mean_HFAI = mean(HFAI),
+    se_HFAI = sd(HFAI)/sqrt(n),
+    .groups="drop"
+  )
+library(dplyr)
+library(ggplot2)
+
+# Make Mesh labels consistent (edit levels/labels if yours are already "Coarse"/"Fine")
+MassHFAI_D18 <- MassHFAI_D18 %>%
+  mutate(
+    Mesh = as.character(Mesh),
+    Mesh = ifelse(Mesh %in% c("C", "Coarse"), "Coarse",
+                  ifelse(Mesh %in% c("F", "Fine"), "Fine", Mesh)),
+    Mesh = factor(Mesh, levels = c("Coarse", "Fine"))
+  )
+
+# Recompute summary (so it matches the cleaned Mesh labels)
+hfai_sum <- MassHFAI_D18 %>%
+  filter(!is.na(HFAI)) %>%
+  group_by(Mesh) %>%
+  summarise(n = n(), mean_HFAI = mean(HFAI, na.rm = TRUE),
+    se_HFAI   = sd(HFAI, na.rm = TRUE) / sqrt(n), .groups = "drop")
+
+
+#HFAI Boxplot
+ggplot(MassHFAI_D18, aes(x = Mesh, y = HFAI)) +
+  geom_hline(yintercept = 0, linetype = "dashed", linewidth = 0.9,
+             color = "darkred") +# zero reference line = no HFA
+  geom_boxplot(width = 0.5,outlier.shape = NA, linewidth = 0.8,
+    fill = "thistle4", color = "black" ) +
+  geom_point(position = position_jitter(width = 0.12),
+    size = 3, alpha = 0.7, color = "black" ) +
+  labs(x = "Mesh size", y = "Home-field advantage index (HFAI)") +
+  theme_classic() +
+  theme(
+    axis.title = element_text(size = 28, color = "black"),
+    axis.text  = element_text(size = 26, color = "black"),
+    axis.line  = element_line(linewidth = 1),
+    axis.ticks = element_line(linewidth = 1),
+    legend.position = "none")
+
+HFAI <- lm(HFAI ~ Mesh * Month , data = MassHFAI)
+anova(HFAI)
+#------------------------------------------------------------------------------#
+
+##Initial chemistry
+
+Chemistry <- read_excel("data/AllData_with chemicals_ALL.samples.xlsx")
+summary(Chemistry)
+dim(Chemistry) #596 x 95
+
+
+InitialChem <- Chemistry %>% filter(Month == 0)
+InitialChem$CN <- InitialChem$PercCarb / InitialChem$PercNit
+View(InitialChem)
+
+t.test(CN ~ Species, data = InitialChem)
+t.test(PercNit ~ Species, data = InitialChem)
+t.test(PB ~ Species, data = InitialChem)
+t.test(AB ~ Species, data = InitialChem)
+
+
+chem_summary <- InitialChem %>%
+  group_by(Species,Park) %>%
+  summarise(
+    n = n(),
+    
+    mean_PercNit = mean(PercNit, na.rm = TRUE),
+    se_PercNit = sd(PercNit, na.rm = TRUE) / sqrt(n),
+    
+    mean_CN = mean(CN, na.rm = TRUE),
+    se_CN = sd(CN, na.rm = TRUE) / sqrt(n),
+    
+    mean_AB = mean(AB, na.rm = TRUE),
+    se_AB = sd(AB, na.rm = TRUE) / sqrt(n),
+    
+    mean_PB = mean(PB, na.rm = TRUE),
+    se_PB = sd(PB, na.rm = TRUE) / sqrt(n)
+  )
+
+chem_summary
+
+#------------------------------------------------------------------------------#
+
+## Leaf physical traits
+Phys <- read_excel("data/Geauga_LeafThickSA_PinVSRed.xlsx")
+dim(Phys)
+summary(Phys)
+View(Phys)
+
+Phys_summary <- Phys %>%
+  group_by(Species) %>%
+  summarise(
+    n = n(),
+    
+    mean_Thickness = mean(Thickness, na.rm = TRUE),
+    se_Thickness = sd(Thickness, na.rm = TRUE) / sqrt(n),
+    
+    mean_SA = mean(SA, na.rm = TRUE),
+    se_SA = sd(SA, na.rm = TRUE) / sqrt(n),
+    
+    mean_SLA = mean(SLA, na.rm = TRUE),
+    se_SLA = sd(SLA, na.rm = TRUE) / sqrt(n)
+  )
+
+View(Phys_summary)
+
+
+
+t.test(Thickness ~ Species, data = Phys)
+t.test(SA ~ Species, data = Phys)
+t.test(SLA ~ Species, data = Phys)
+
+#------------------------------------------------------------------------------#
+
+View(MassK)
+
+MassK <- MassK %>%
+  mutate(
+    Home = case_when(
+      Species == "Pin" & Habitat == "Lowland" ~ "Home",
+      Species == "Pin" & Habitat == "Upland"     ~ "Away",
+      Species == "Red"     & Habitat == "Upland"     ~ "Home",
+      Species == "Red"     & Habitat == "Lowland" ~ "Away",
+      TRUE ~ NA_character_
+    ),
+    Home  = factor(Home, levels = c("Away","Home")),
+    Month = factor(Month, levels = sort(unique(Month))),
+    Mesh  = factor(Mesh)
+  )
+
+MassK$logMassLoss <- log(MassK$PercMassLoss + 1)
+
+mod_hfa <- lmer(logMassLoss ~ Month * Mesh * Home + (1 | Park/Rep),
+  data = MassK)
+summary(mod_hfa)
+
+emm <- emmeans(mod_hfa, ~ Home | Month * Mesh)
+emm
+hfa <- as.data.frame(contrast(emm, method = "revpairwise"))  # Home - Away
+hfa
+hfa_ci <- hfa %>%
+  mutate(
+    tcrit = qt(0.90, df),
+    lower.CL = estimate - tcrit * SE,
+    upper.CL = estimate + tcrit * SE
+  )
+
+ggplot(hfa_ci, aes(x = Month, y = estimate, fill = Mesh)) +
+  geom_bar(stat="identity", position=position_dodge(0.8),
+           width=0.7, color="black") +
+  geom_errorbar(aes(ymin = lower.CL, ymax = upper.CL),
+                position = position_dodge(0.8), width = 0.2) +
+  geom_hline(yintercept=0, color="red", linewidth=0.8) +
+  scale_fill_manual(values = c("C"="black","F"="grey70"),
+                    labels = c("Coarse","Fine")) +
+  labs(x="Month", y="Estimated HFA (Home − Away) (80% CI)", fill="Mesh") +
+  theme_classic()
